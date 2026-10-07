@@ -94,6 +94,8 @@ public class ReservationService : IReservationService
                 EventId = r.EventId,
                 EventName = r.Event!.Name,
                 EventStartDate = r.Event.StartDate,
+                EventEndDate = r.Event.EndDate,
+                EventLocation = r.Event.Location,
                 UserId = r.UserId,
                 UserFullName = (r.User!.FirstName + " " + r.User.LastName).Trim(),
                 UserEmail = r.User.Email ?? string.Empty,

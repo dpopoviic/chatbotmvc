@@ -27,6 +27,8 @@ namespace EventReservationApp.Services.Implementations
                     EventId = r.EventId,
                     EventName = r.EventName,
                     EventStartDate = r.EventStartDate,
+                    EventEndDate = r.EventEndDate,
+                    EventLocation = r.EventLocation,
                     ReservationDate = r.ReservationDate,
                     Notes = r.Notes
                 })

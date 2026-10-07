@@ -79,7 +79,10 @@ builder.Services.AddScoped<IMyReservationsService, MyReservationsService>();
 // tracker API) instead of an in-process agent; the actual tool logic
 // (search events, availability, reservations) is exposed to Rasa's custom
 // actions via the internal API below, not called in-process anymore.
-builder.Services.AddHttpClient<IChatbotConversationService, RasaChatbotConversationService>();
+// The ReAct sub agent can make several LLM and tool calls for one message,
+// so the default 100 s HttpClient timeout is too tight.
+builder.Services.AddHttpClient<IChatbotConversationService, RasaChatbotConversationService>(
+    client => client.Timeout = TimeSpan.FromSeconds(180));
 // ---------------------------------------------------------------------
 // MVC + Razor Pages (Razor Pages are required by the default Identity UI)
 // ---------------------------------------------------------------------

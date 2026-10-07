@@ -26,6 +26,8 @@ public class ReservationListItemViewModel
     public int EventId { get; set; }
     public string EventName { get; set; } = string.Empty;
     public DateTime EventStartDate { get; set; }
+    public DateTime EventEndDate { get; set; }
+    public string EventLocation { get; set; } = string.Empty;
     public string UserId { get; set; } = string.Empty;
     public string UserFullName { get; set; } = string.Empty;
     public string UserEmail { get; set; } = string.Empty;
