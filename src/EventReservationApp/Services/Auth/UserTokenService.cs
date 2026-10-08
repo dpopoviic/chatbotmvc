@@ -13,6 +13,9 @@ public class UserTokenService : IUserTokenService
     public const string Issuer = "event-reservation-app";
     public const string Audience = "event-reservation-chatbot";
 
+    // Must match the claim name read in secure_rest_channel.py.
+    public const string RolesClaim = "roles";
+
     // One token per chat message. Short, because the token is stored in Rasa's
     // tracker store with the message metadata and must not stay usable there.
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(5);
@@ -51,18 +54,21 @@ public class UserTokenService : IUserTokenService
         };
     }
 
-    public string CreateToken(string userId)
+    public string CreateToken(string userId, IEnumerable<string> roles)
     {
         if (string.IsNullOrWhiteSpace(userId))
         {
             throw new ArgumentException("User id is required.", nameof(userId));
         }
 
+        ArgumentNullException.ThrowIfNull(roles);
+
         var now = DateTime.UtcNow;
 
         return _tokenHandler.CreateToken(new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[] { new Claim(JwtRegisteredClaimNames.Sub, userId) }),
+            Claims = new Dictionary<string, object> { [RolesClaim] = roles.ToArray() },
             Issuer = Issuer,
             Audience = Audience,
             IssuedAt = now,

@@ -1,8 +1,10 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using EventReservationApp.Models.Entities;
 using EventReservationApp.Models.ViewModels;
 using EventReservationApp.Services.Interfaces;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
 
 namespace EventReservationApp.Services.Implementations;
@@ -18,6 +20,7 @@ public class RasaChatbotConversationService : IChatbotConversationService
     private readonly HttpClient _httpClient;
     private readonly ILogger<RasaChatbotConversationService> _logger;
     private readonly IUserTokenService _userTokenService;
+    private readonly UserManager<ApplicationUser> _userManager;
     private readonly string _tokenQuery;
     private readonly string? _trackerConnectionString;
 
@@ -25,10 +28,12 @@ public class RasaChatbotConversationService : IChatbotConversationService
         HttpClient httpClient,
         IConfiguration configuration,
         IUserTokenService userTokenService,
+        UserManager<ApplicationUser> userManager,
         ILogger<RasaChatbotConversationService> logger)
     {
         _logger = logger;
         _userTokenService = userTokenService;
+        _userManager = userManager;
 
         // Rasa's SQLTrackerStore database (see tracker_store in the Rasa endpoints.yml).
         // Read-only here; Rasa owns the schema.
@@ -73,8 +78,12 @@ public class RasaChatbotConversationService : IChatbotConversationService
             {
                 Content = JsonContent.Create(payload, options: JsonOptions)
             };
+            var user = await _userManager.FindByIdAsync(userId)
+                ?? throw new InvalidOperationException($"User {userId} not found.");
+            var roles = await _userManager.GetRolesAsync(user);
+
             request.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer", _userTokenService.CreateToken(userId));
+                "Bearer", _userTokenService.CreateToken(userId, roles));
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 

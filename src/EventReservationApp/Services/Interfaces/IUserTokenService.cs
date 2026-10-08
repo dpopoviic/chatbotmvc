@@ -6,7 +6,9 @@ namespace EventReservationApp.Services.Interfaces
     // so it can check a token but never forge one for another user.
     public interface IUserTokenService
     {
-        string CreateToken(string userId);
+        // The roles go into the token's "roles" claim (always a JSON array) so
+        // Rasa can limit knowledge base search to what the user may read.
+        string CreateToken(string userId, IEnumerable<string> roles);
 
         // Returns the user id from a valid token, or null if the token is invalid,
         // expired, or not issued by this app.

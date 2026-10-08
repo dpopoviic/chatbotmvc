@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using EventReservationApp.Services.Auth;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -61,9 +62,27 @@ public class UserTokenServiceTests
     {
         var service = CreateService(NewPrivateKeyPem());
 
-        var token = service.CreateToken("user-123");
+        var token = service.CreateToken("user-123", []);
 
         Assert.Equal("user-123", await service.ValidateTokenAsync(token));
+    }
+
+    // Rasa limits knowledge base search by these roles, and reads the claim as a list.
+    [Theory]
+    [InlineData("")]
+    [InlineData("Customer")]
+    [InlineData("Administrator,Customer")]
+    public void CreatedToken_CarriesRolesAsJsonArray(string roleList)
+    {
+        var roles = roleList.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var service = CreateService(NewPrivateKeyPem());
+
+        var token = service.CreateToken("user-123", roles);
+
+        var payload = JsonDocument.Parse(Base64UrlEncoder.Decode(token.Split('.')[1]));
+        var claim = payload.RootElement.GetProperty(UserTokenService.RolesClaim);
+        Assert.Equal(JsonValueKind.Array, claim.ValueKind);
+        Assert.Equal(roles, claim.EnumerateArray().Select(r => r.GetString()).ToArray());
     }
 
     [Fact]
@@ -81,7 +100,7 @@ public class UserTokenServiceTests
     {
         var key = NewPrivateKeyPem();
         var service = CreateService(key);
-        var token = service.CreateToken("attacker");
+        var token = service.CreateToken("attacker", []);
 
         // Swap the payload for one naming another user, keeping the original signature.
         var parts = token.Split('.');
