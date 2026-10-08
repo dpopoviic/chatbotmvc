@@ -40,6 +40,25 @@ public class MyReservationsServiceTests
     }
 
     [Fact]
+    public async Task GetMyReservationsAsync_IncludesEventEndDateAndLocation()
+    {
+        await using var db = InMemoryDbContextFactory.Create();
+        db.AddUser("user-1");
+        var start = new DateTime(2026, 10, 15, 18, 0, 0);
+        var end = new DateTime(2026, 10, 15, 21, 30, 0);
+        db.AddEvent(1, name: "Event A", location: "Beograd", startDate: start, endDate: end);
+        db.AddReservation(1, "user-1", 1);
+        await db.SaveChangesAsync();
+
+        var (service, _) = CreateService(db, FakeCurrentUser.For("user-1"));
+
+        var reservation = Assert.Single(await service.GetMyReservationsAsync());
+        Assert.Equal(start, reservation.EventStartDate);
+        Assert.Equal(end, reservation.EventEndDate);
+        Assert.Equal("Beograd", reservation.EventLocation);
+    }
+
+    [Fact]
     public async Task GetMyReservationsAsync_Unauthenticated_ThrowsUnauthorizedAccessException()
     {
         await using var db = InMemoryDbContextFactory.Create();

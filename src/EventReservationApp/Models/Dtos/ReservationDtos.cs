@@ -6,6 +6,8 @@
         public int EventId { get; set; }
         public string EventName { get; set; } = string.Empty;
         public DateTime EventStartDate { get; set; }
+        public DateTime EventEndDate { get; set; }
+        public string EventLocation { get; set; } = string.Empty;
         public DateTime ReservationDate { get; set; }
         public string? Notes { get; set; }
     }
