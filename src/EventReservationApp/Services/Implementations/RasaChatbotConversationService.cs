@@ -78,6 +78,7 @@ public class RasaChatbotConversationService : IChatbotConversationService
             {
                 Content = JsonContent.Create(payload, options: JsonOptions)
             };
+            //nije iz kukija -ako admin promeni ulogu, vidi se odmah u sledecoj poruci, a ne prilikom novog login-a
             var user = await _userManager.FindByIdAsync(userId)
                 ?? throw new InvalidOperationException($"User {userId} not found.");
             var roles = await _userManager.GetRolesAsync(user);
