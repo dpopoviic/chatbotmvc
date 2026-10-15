@@ -203,8 +203,11 @@ swapped without touching the rest of the MVC application:
   availability, and manage the current user's reservations. It is a thin wrapper over
   `IEventCatalogService` / `IMyReservationsService` - no business logic lives in it or in Rasa.
 
-Configuration lives under `RasaSettings` (`BaseUrl`, `AuthToken`) and `InternalApi` (`ApiKey`) in
-`appsettings.json`; put real secret values in user-secrets rather than committing them.
+Configuration lives under `RasaSettings` (`BaseUrl`), `InternalApi` (`ApiKey`) and `UserToken`
+(`PrivateKeyPem`) in `appsettings.json`; put real secret values in user-secrets rather than
+committing them. Every call to Rasa (messages and "new conversation") goes through the Rasa
+project's `secure_rest` channel with a signed user token, so Rasa runs without its HTTP API
+(`--enable-api`) and needs no auth token.
 
 See `moj-rasa-agent/` for the Rasa Pro project itself (flows, domain, NLU data, custom actions).
 

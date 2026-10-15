@@ -21,7 +21,6 @@ public class RasaChatbotConversationService : IChatbotConversationService
     private readonly ILogger<RasaChatbotConversationService> _logger;
     private readonly IUserTokenService _userTokenService;
     private readonly UserManager<ApplicationUser> _userManager;
-    private readonly string _tokenQuery;
     private readonly string? _trackerConnectionString;
 
     public RasaChatbotConversationService(
@@ -47,13 +46,29 @@ public class RasaChatbotConversationService : IChatbotConversationService
 
         httpClient.BaseAddress = new Uri(baseUrl);
 
-        
-        var authToken = configuration["RasaSettings:AuthToken"];
-        _tokenQuery = string.IsNullOrWhiteSpace(authToken)
-            ? string.Empty
-            : $"?token={Uri.EscapeDataString(authToken)}";
-
         _httpClient = httpClient;
+    }
+
+    // Every call to Rasa goes through the secure_rest channel (secure_rest_channel.py
+    // in the Rasa project) with a signed user token: it proves the request comes
+    // from this app for this user, and Rasa rejects it unless the token's subject
+    // equals the sender in the body.
+    private async Task<HttpRequestMessage> CreateSecureRestRequestAsync(
+        string path,
+        string userId,
+        object body)
+    {
+        var user = await _userManager.FindByIdAsync(userId)
+            ?? throw new InvalidOperationException($"User {userId} not found.");
+        var roles = await _userManager.GetRolesAsync(user);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(body, options: JsonOptions)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", _userTokenService.CreateToken(userId, roles));
+        return request;
     }
 
     public async Task<ChatResponseViewModel> GetReplyAsync(
@@ -70,20 +85,9 @@ public class RasaChatbotConversationService : IChatbotConversationService
                 Metadata = new() { ["language"] = "en" }
             };
 
-            // secure_rest channel (secure_rest_channel.py in the Rasa project): the
-            // signed user token proves the message comes from this app for this
-            // user. Rasa rejects it unless the token's subject equals the sender,
-            // and passes the token on to the custom actions for the internal API.
-            using var request = new HttpRequestMessage(HttpMethod.Post, "webhooks/secure_rest/webhook")
-            {
-                Content = JsonContent.Create(payload, options: JsonOptions)
-            };
-            var user = await _userManager.FindByIdAsync(userId)
-                ?? throw new InvalidOperationException($"User {userId} not found.");
-            var roles = await _userManager.GetRolesAsync(user);
-
-            request.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer", _userTokenService.CreateToken(userId, roles));
+            // Rasa also passes the token on to the custom actions for the internal API.
+            using var request = await CreateSecureRestRequestAsync(
+                "webhooks/secure_rest/webhook", userId, payload);
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -213,13 +217,12 @@ public class RasaChatbotConversationService : IChatbotConversationService
     {
         try
         {
-            var restartEvent = new { @event = "restart" };
+            // Restart route of the secure_rest channel: same token check as a
+            // message, so Rasa runs without its HTTP API (--enable-api) and auth token.
+            using var request = await CreateSecureRestRequestAsync(
+                "webhooks/secure_rest/restart", userId, new { sender = userId });
 
-            using var response = await _httpClient.PostAsJsonAsync(
-                $"conversations/{Uri.EscapeDataString(userId)}/tracker/events{_tokenQuery}",
-                restartEvent,
-                JsonOptions,
-                cancellationToken);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             response.EnsureSuccessStatusCode();
         }

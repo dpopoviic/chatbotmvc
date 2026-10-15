@@ -12,8 +12,7 @@
   },
   "AllowedHosts": "*",
   "RasaSettings": {
-    "BaseUrl": "http://localhost:5005",
-    "AuthToken": "REPLACE_WITH_RASA_AUTH_TOKEN"
+    "BaseUrl": "http://localhost:5005"
   },
   "InternalApi": {
     "ApiKey": "REPLACE_WITH_INTERNAL_API_KEY"
