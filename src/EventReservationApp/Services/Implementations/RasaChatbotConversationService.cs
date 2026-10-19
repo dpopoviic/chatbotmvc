@@ -53,10 +53,13 @@ public class RasaChatbotConversationService : IChatbotConversationService
     // in the Rasa project) with a signed user token: it proves the request comes
     // from this app for this user, and Rasa rejects it unless the token's subject
     // equals the sender in the body.
+    // The correlation id goes into the token (claim "cid"), so it reaches Rasa,
+    // its actions, the MCP tools and the internal API signed and unchanged.
     private async Task<HttpRequestMessage> CreateSecureRestRequestAsync(
         string path,
         string userId,
-        object body)
+        object body,
+        string correlationId)
     {
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new InvalidOperationException($"User {userId} not found.");
@@ -67,8 +70,17 @@ public class RasaChatbotConversationService : IChatbotConversationService
             Content = JsonContent.Create(body, options: JsonOptions)
         };
         request.Headers.Authorization = new AuthenticationHeaderValue(
-            "Bearer", _userTokenService.CreateToken(userId, roles));
+            "Bearer", _userTokenService.CreateToken(userId, roles, correlationId));
         return request;
+    }
+
+    // One correlation id per chat message (or restart). Every log written inside
+    // the returned scope - here and in anything called from here - carries it.
+    private (string CorrelationId, IDisposable? LogScope) BeginCorrelation()
+    {
+        var correlationId = Guid.NewGuid().ToString();
+        var scope = _logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
+        return (correlationId, scope);
     }
 
     public async Task<ChatResponseViewModel> GetReplyAsync(
@@ -76,6 +88,8 @@ public class RasaChatbotConversationService : IChatbotConversationService
         string message,
         CancellationToken cancellationToken = default)
     {
+        var (correlationId, logScope) = BeginCorrelation();
+        using var _ = logScope;
         try
         {
             var payload = new RasaWebhookRequest
@@ -86,7 +100,7 @@ public class RasaChatbotConversationService : IChatbotConversationService
             };
 
             using var request = await CreateSecureRestRequestAsync(
-                "webhooks/secure_rest/webhook", userId, payload);
+                "webhooks/secure_rest/webhook", userId, payload, correlationId);
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -214,12 +228,14 @@ public class RasaChatbotConversationService : IChatbotConversationService
         string userId,
         CancellationToken cancellationToken = default)
     {
+        var (correlationId, logScope) = BeginCorrelation();
+        using var _ = logScope;
         try
         {
             // Restart route of the secure_rest channel: same token check as a
             // message, so Rasa runs without its HTTP API (--enable-api) and auth token.
             using var request = await CreateSecureRestRequestAsync(
-                "webhooks/secure_rest/restart", userId, new { sender = userId });
+                "webhooks/secure_rest/restart", userId, new { sender = userId }, correlationId);
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
