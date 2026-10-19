@@ -42,11 +42,12 @@ namespace EventReservationApp.Services.Implementations
         {
             var userId = _currentUser.RequireUserId();
 
-            var (success, errorMessage) = await _reservationService.CreateAsync(userId, eventId, notes);
+            var (success, errorMessage, errorCode) = await _reservationService.CreateAsync(userId, eventId, notes);
 
+            // CreateAsync always sets both on failure.
             return success
                 ? ReservationOperationResult.Ok()
-                : ReservationOperationResult.Fail(errorMessage ?? "Unable to create the reservation.");
+                : ReservationOperationResult.Fail(errorCode!.Value, errorMessage ?? "Unable to create the reservation.");
         }
 
         public async Task<ReservationOperationResult> CancelForCurrentUserAsync(
@@ -60,13 +61,13 @@ namespace EventReservationApp.Services.Implementations
             var isOwnedByCurrentUser = await _reservationService.IsOwnedByUserAsync(reservationId, userId);
             if (!isOwnedByCurrentUser)
             {
-                return ReservationOperationResult.Fail("Reservation not found.");
+                return ReservationOperationResult.Fail(ReservationErrorCode.ReservationNotFound, "Reservation not found.");
             }
 
             var deleted = await _reservationService.DeleteAsync(reservationId);
             return deleted
                 ? ReservationOperationResult.Ok(reservationId)
-                : ReservationOperationResult.Fail("Reservation not found.");
+                : ReservationOperationResult.Fail(ReservationErrorCode.ReservationNotFound, "Reservation not found.");
         }
     }
 

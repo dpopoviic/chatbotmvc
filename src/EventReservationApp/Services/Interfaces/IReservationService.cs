@@ -1,3 +1,4 @@
+using EventReservationApp.Models.Dtos;
 using EventReservationApp.Models.ViewModels;
 
 namespace EventReservationApp.Services.Interfaces;
@@ -19,8 +20,10 @@ public interface IReservationService
     /// <summary>
     /// Attempts to create a reservation. Fails if the event is already at
     /// capacity or the user already has a reservation for this event.
+    /// On failure both ErrorMessage and ErrorCode are set.
     /// </summary>
-    Task<(bool Success, string? ErrorMessage)> CreateAsync(string userId, int eventId, string? notes);
+    Task<(bool Success, string? ErrorMessage, ReservationErrorCode? ErrorCode)> CreateAsync(
+        string userId, int eventId, string? notes);
 
     /// <summary>
     /// Deletes a reservation. The caller is responsible for verifying the

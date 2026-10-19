@@ -82,10 +82,9 @@ public class RasaChatbotConversationService : IChatbotConversationService
             {
                 Sender = userId,
                 Message = message,
-                Metadata = new() { ["language"] = "en" }
+                Metadata = new() { ["language"] = "sr-Cyrl" }
             };
 
-            // Rasa also passes the token on to the custom actions for the internal API.
             using var request = await CreateSecureRestRequestAsync(
                 "webhooks/secure_rest/webhook", userId, payload);
 
