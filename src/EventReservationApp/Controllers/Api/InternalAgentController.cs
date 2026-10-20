@@ -6,6 +6,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace EventReservationApp.Controllers.Api;
 
+/// Interni API na posebnom Kestrel endpoint-u ili portu, 
+/// sa RequireHost na kontroleru ili mrežnim pravilom, 
+/// tako da je dostupan samo iz Rasine mreže.
+
 [ApiController]
 [Route("api/internal")]
 [Authorize(AuthenticationSchemes = InternalApiKeyHandler.SchemeName)]
