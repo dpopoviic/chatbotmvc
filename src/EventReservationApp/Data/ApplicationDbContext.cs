@@ -21,6 +21,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, IdentityR
 
     public DbSet<EventReservation> EventReservations { get; set; } = null!;
     public DbSet<ChatConversation> ChatConversations { get; set; } = null!;
+    public DbSet<IdempotencyRecord> IdempotencyRecords { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -85,6 +86,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, IdentityR
 
             entity.HasIndex(x => x.UserId)
                 .IsUnique();
+        });
+
+        // ---------------------------------------------------------------
+        // IdempotencyRecord: the unique (UserId, Key) index is what makes a
+        // repeated request detectable - a second insert of the same key fails
+        // (and while the first one's transaction is open, it waits for it).
+        // ---------------------------------------------------------------
+        builder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.ToTable("IdempotencyRecords");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.UserId).IsRequired().HasMaxLength(450);
+            entity.Property(x => x.Operation).IsRequired().HasMaxLength(50);
+            entity.Property(x => x.RequestHash).IsRequired().HasMaxLength(64);
+            entity.Property(x => x.ResponseJson).IsRequired();
+
+            entity.HasIndex(x => new { x.UserId, x.Key }).IsUnique();
+            entity.HasIndex(x => x.ExpiresAtUtc);
         });
     }
 }
