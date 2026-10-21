@@ -2,31 +2,47 @@
     ViewData["Title"] = "Chatbot";
 }
 
-<h1>AI korisnička podrška</h1>
-<p class="text-muted">
-    Postavite pitanje ispod. Chatbot će odgovoriti na vaša pitanja. Ukoliko nije moguće 
-    pronaći odgovor u bazi znanja, kontaktirajte nas direktno putem telefona ili mejla.
-</p>
+<section class="cb-stage">
+    <div class="cb-intro">
+        <span class="cb-eyebrow">AI asistent</span>
+        <h1 class="cb-title">AI korisnička podrška</h1>
+        <p class="cb-lead">
+            Postavite pitanje ispod. Chatbot će odgovoriti na vaša pitanja. Ukoliko nije moguće
+            pronaći odgovor u bazi znanja, kontaktirajte nas direktno putem telefona ili mejla.
+        </p>
+    </div>
 
-<form id="antiforgeryForm">
-    @Html.AntiForgeryToken()
-</form>
+    <form id="antiforgeryForm">
+        @Html.AntiForgeryToken()
+    </form>
 
-<div class="card" style="max-width: 700px;">
-    <div class="card-body">
-        <div id="chatWindow" class="border rounded p-3 mb-3 bg-light" style="height: 400px; overflow-y: auto;">
-            <div class="chat-message chat-assistant mb-2">
-                <span class="badge bg-secondary">Asistent</span>
-                <div>Zdravo! Ja sam Vaš asistent. Kako vam mogu pomoći?</div>
+    <div class="cb-panel">
+        <div class="cb-header">
+            <div class="cb-avatar" aria-hidden="true"><span></span></div>
+            <div class="cb-header-text">
+                <div class="cb-name">Asistent Vlaki</div>
+                <div class="cb-status"><span class="cb-status-dot"></span>Online</div>
+            </div>
+            <button id="newConversationButton" type="button" class="cb-ghost-btn" title="Nova konverzacija">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
+                <span>Nova konverzacija</span>
+            </button>
+        </div>
+
+        <div id="chatWindow" class="cb-window" aria-live="polite">
+            <div class="chat-message chat-assistant">
+                <div class="chat-bubble">Zdravo! Ja sam Vaš asistent. Kako vam mogu pomoći?</div>
             </div>
         </div>
 
-        <form id="chatForm" class="d-flex gap-2">
-            <input id="chatInput" type="text" class="form-control" placeholder="Type your message..." autocomplete="off" required />
-            <button id="chatSendButton" type="submit" class="btn btn-primary">Send</button>
+        <form id="chatForm" class="cb-composer">
+            <input id="chatInput" type="text" class="cb-input" placeholder="Napišite poruku..." autocomplete="off" required />
+            <button id="chatSendButton" type="submit" class="cb-send" title="Pošalji" aria-label="Pošalji">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"/></svg>
+            </button>
         </form>
     </div>
-</div>
+</section>
 
 @section Scripts {
     <script>
@@ -35,47 +51,46 @@
             const chatForm = document.getElementById('chatForm');
             const chatInput = document.getElementById('chatInput');
             const sendButton = document.getElementById('chatSendButton');
+            const newConversationButton = document.getElementById('newConversationButton');
             const token = document.querySelector('#antiforgeryForm input[name="__RequestVerificationToken"]').value;
-            const sendButtonOriginalText = sendButton.textContent;
-            let typingInterval = null;
-            let typingStep = 0;
+            // The greeting the page starts with; shown again after a new conversation.
+            const greetingHtml = chatWindow.innerHTML;
+            let typingIndicator = null;
 
             function appendMessage(sender, text) {
                 const wrapper = document.createElement('div');
-                wrapper.className = 'chat-message chat-' + sender + ' mb-2';
-
-                const badge = document.createElement('span');
-                badge.className = 'badge ' + (sender === 'user' ? 'bg-primary' : 'bg-secondary');
-                badge.textContent = sender === 'user' ? 'You' : 'Asistent';
+                wrapper.className = 'chat-message chat-' + sender;
 
                 const body = document.createElement('div');
+                body.className = 'chat-bubble';
                 body.textContent = text;
 
-                wrapper.appendChild(badge);
                 wrapper.appendChild(body);
                 chatWindow.appendChild(wrapper);
                 chatWindow.scrollTop = chatWindow.scrollHeight;
             }
 
+            // Animated "..." bubble inside the chat window while the bot is answering.
             function startTypingIndicator() {
-                typingStep = 0;
                 sendButton.disabled = true;
-                sendButton.textContent = 'Typing.';
+                // A reply still on its way would land in the new conversation.
+                newConversationButton.disabled = true;
 
-                typingInterval = setInterval(function () {
-                    typingStep = (typingStep + 1) % 3;
-                    sendButton.textContent = 'Typing' + '.'.repeat(typingStep + 1);
-                }, 500);
+                typingIndicator = document.createElement('div');
+                typingIndicator.className = 'chat-message chat-assistant chat-typing';
+                typingIndicator.innerHTML = '<div class="chat-bubble"><span></span><span></span><span></span></div>';
+                chatWindow.appendChild(typingIndicator);
+                chatWindow.scrollTop = chatWindow.scrollHeight;
             }
 
             function stopTypingIndicator() {
-                if (typingInterval) {
-                    clearInterval(typingInterval);
-                    typingInterval = null;
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                    typingIndicator = null;
                 }
 
-                sendButton.textContent = sendButtonOriginalText;
                 sendButton.disabled = false;
+                newConversationButton.disabled = false;
             }
 
             // Show the latest messages of the current conversation; the greeting
@@ -104,6 +119,33 @@
 
             loadHistory();
 
+            // Restarts the Rasa conversation (POST /Chatbot/NewConversation -> secure_rest
+            // /restart): the bot forgets everything said so far, the window starts over.
+            newConversationButton.addEventListener('click', async function () {
+                newConversationButton.disabled = true;
+                sendButton.disabled = true;
+
+                try {
+                    const response = await fetch('@Url.Action("NewConversation", "Chatbot")', {
+                        method: 'POST',
+                        headers: { 'X-CSRF-TOKEN': token }
+                    });
+
+                    if (!response.ok) {
+                        appendMessage('assistant', 'Nije moguće započeti novu konverzaciju. Molimo pokušajte ponovo kasnije.');
+                        return;
+                    }
+
+                    chatWindow.innerHTML = greetingHtml;
+                } catch (err) {
+                    appendMessage('assistant', 'Nije moguće započeti novu konverzaciju. Molimo pokušajte ponovo kasnije.');
+                } finally {
+                    newConversationButton.disabled = false;
+                    sendButton.disabled = false;
+                    chatInput.focus();
+                }
+            });
+
             chatForm.addEventListener('submit', async function (e) {
                 e.preventDefault();
                 const message = chatInput.value.trim();
@@ -126,13 +168,16 @@
                     });
 
                     if (!response.ok) {
+                        stopTypingIndicator();
                         appendMessage('assistant', 'Došlo je do problema prilikom komunikacije s chatbotom. Molimo pokušajte ponovo kasnije.');
                         return;
                     }
 
                     const data = await response.json();
+                    stopTypingIndicator();
                     appendMessage('assistant', data.reply);
                 } catch (err) {
+                    stopTypingIndicator();
                     appendMessage('assistant', 'Došlo je do problema prilikom komunikacije s chatbotom. Molimo pokušajte ponovo kasnije.');
                 } finally {
                     stopTypingIndicator();

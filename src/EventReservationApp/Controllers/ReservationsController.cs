@@ -93,7 +93,7 @@ public class ReservationsController : Controller
             return View(model);
         }
 
-        var (success, errorMessage) = await _reservationService.CreateAsync(CurrentUserId, model.EventId, model.Notes);
+        var (success, errorMessage, _) = await _reservationService.CreateAsync(CurrentUserId, model.EventId, model.Notes);
         if (!success)
         {
             ModelState.AddModelError(string.Empty, errorMessage ?? "Unable to create the reservation.");

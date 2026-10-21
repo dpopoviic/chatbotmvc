@@ -39,15 +39,30 @@ public class UserTokenServiceTests
         string subject,
         string issuer = UserTokenService.Issuer,
         string audience = UserTokenService.Audience,
-        DateTime? expires = null)
+        DateTime? expires = null,
+        string? messageId = "message-1",
+        string? correlationId = "correlation-1")
     {
         var ecdsa = ECDsa.Create();
         ecdsa.ImportFromPem(privateKeyPem);
         var expiresAt = expires ?? DateTime.UtcNow.AddMinutes(5);
 
+        var subjectClaims = new List<Claim> { new(JwtRegisteredClaimNames.Sub, subject) };
+        if (messageId is not null)
+        {
+            subjectClaims.Add(new Claim(UserTokenService.MessageIdClaim, messageId));
+        }
+
+        var claims = new Dictionary<string, object>();
+        if (correlationId is not null)
+        {
+            claims[UserTokenService.CorrelationIdClaim] = correlationId;
+        }
+
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
-            Subject = new ClaimsIdentity(new[] { new Claim(JwtRegisteredClaimNames.Sub, subject) }),
+            Subject = new ClaimsIdentity(subjectClaims),
+            Claims = claims,
             Issuer = issuer,
             Audience = audience,
             IssuedAt = expiresAt.AddMinutes(-10),
@@ -58,13 +73,63 @@ public class UserTokenServiceTests
     }
 
     [Fact]
-    public async Task CreatedToken_ValidatesToTheSameUserId()
+    public async Task CreatedToken_ValidatesToTheSameUserIdAndCorrelationId()
     {
         var service = CreateService(NewPrivateKeyPem());
 
-        var token = service.CreateToken("user-123", []);
+        var token = service.CreateToken("user-123", [], "correlation-1");
 
-        Assert.Equal("user-123", await service.ValidateTokenAsync(token));
+        var claims = await service.ValidateTokenAsync(token);
+        Assert.NotNull(claims);
+        Assert.Equal("user-123", claims.UserId);
+        Assert.Equal("correlation-1", claims.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(claims.MessageId));
+    }
+
+    // The message id identifies one chat message, so every token gets its own.
+    [Fact]
+    public async Task EveryCreatedToken_HasItsOwnMessageId()
+    {
+        var service = CreateService(NewPrivateKeyPem());
+
+        var first = await service.ValidateTokenAsync(service.CreateToken("user-123", [], "correlation-1"));
+        var second = await service.ValidateTokenAsync(service.CreateToken("user-123", [], "correlation-1"));
+
+        Assert.NotEqual(first!.MessageId, second!.MessageId);
+    }
+
+    [Theory]
+    [InlineData(null, "correlation-1")]
+    [InlineData("message-1", null)]
+    [InlineData("message-1", "")]
+    public async Task TokenWithoutMessageOrCorrelationId_IsRejected(string? messageId, string? correlationId)
+    {
+        var key = NewPrivateKeyPem();
+        var service = CreateService(key);
+
+        var token = SignToken(key, "user-123", messageId: messageId, correlationId: correlationId);
+
+        Assert.Null(await service.ValidateTokenAsync(token));
+    }
+
+    [Fact]
+    public async Task CompleteTokenSignedWithTheAppKey_IsAccepted()
+    {
+        // Guards the rejection tests above: the same helper with all claims passes.
+        var key = NewPrivateKeyPem();
+        var service = CreateService(key);
+
+        Assert.NotNull(await service.ValidateTokenAsync(SignToken(key, "user-123")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void CreateToken_WithoutCorrelationId_Throws(string correlationId)
+    {
+        var service = CreateService(NewPrivateKeyPem());
+
+        Assert.Throws<ArgumentException>(() => service.CreateToken("user-123", [], correlationId));
     }
 
     // Rasa limits knowledge base search by these roles, and reads the claim as a list.
@@ -77,7 +142,7 @@ public class UserTokenServiceTests
         var roles = roleList.Split(',', StringSplitOptions.RemoveEmptyEntries);
         var service = CreateService(NewPrivateKeyPem());
 
-        var token = service.CreateToken("user-123", roles);
+        var token = service.CreateToken("user-123", roles, "correlation-1");
 
         var payload = JsonDocument.Parse(Base64UrlEncoder.Decode(token.Split('.')[1]));
         var claim = payload.RootElement.GetProperty(UserTokenService.RolesClaim);
@@ -100,7 +165,7 @@ public class UserTokenServiceTests
     {
         var key = NewPrivateKeyPem();
         var service = CreateService(key);
-        var token = service.CreateToken("attacker", []);
+        var token = service.CreateToken("attacker", [], "correlation-1");
 
         // Swap the payload for one naming another user, keeping the original signature.
         var parts = token.Split('.');

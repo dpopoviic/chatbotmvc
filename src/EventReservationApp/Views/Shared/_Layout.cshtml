@@ -1,17 +1,36 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - Event Reservation App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.3/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
-<body>
+@{
+    // The default Identity UI pages (login, register, profile...) render inside this layout;
+    // a body class lets site.css style them without scaffolding them into the project.
+    var identityPage = ViewContext.RouteData.Values["area"] as string == "Identity"
+        ? ViewContext.RouteData.Values["page"] as string
+        : null;
+    var bodyClass = identityPage is null
+        ? null
+        : identityPage.StartsWith("/Account/Manage") ? "identity-manage" : "identity-account";
+}
+<body class="@bodyClass">
+    <div class="fx-bg" aria-hidden="true">
+        <div class="fx-orb fx-orb-1"></div>
+        <div class="fx-orb fx-orb-2"></div>
+        <div class="fx-orb fx-orb-3"></div>
+    </div>
+
     <header>
-        <nav class="navbar navbar-expand-sm navbar-dark bg-dark mb-3">
+        <nav class="navbar navbar-expand-sm navbar-dark navbar-glass mb-4">
             <div class="container-fluid">
-                <a class="navbar-brand" asp-controller="Home" asp-action="Index">Event Reservation App</a>
+                <a class="navbar-brand" asp-controller="Home" asp-action="Index"><span class="brand-mark" aria-hidden="true"></span>Event Reservation App</a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse">
                     <span class="navbar-toggler-icon"></span>
                 </button>
@@ -74,7 +93,7 @@
         </main>
     </div>
 
-    <footer class="border-top footer text-muted mt-4">
+    <footer class="footer text-muted mt-4">
         <div class="container">
             &copy; @DateTime.Now.Year - Event Reservation App - a reusable ASP.NET Core MVC reference project
         </div>

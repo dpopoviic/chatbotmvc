@@ -65,15 +65,15 @@ public class InternalApiKeyHandler : AuthenticationHandler<AuthenticationSchemeO
             return AuthenticateResult.Fail("Missing user token.");
         }
 
-        var userId = await _userTokenService.ValidateTokenAsync(header[BearerPrefix.Length..].Trim());
-        if (userId is null)
+        var tokenClaims = await _userTokenService.ValidateTokenAsync(header[BearerPrefix.Length..].Trim());
+        if (tokenClaims is null)
         {
             return AuthenticateResult.Fail("Invalid or expired user token.");
         }
 
         // The token can outlive a change to the account (deleted, locked out)
         // by a few minutes, so the account itself is checked on every call.
-        var user = await _userManager.FindByIdAsync(userId);
+        var user = await _userManager.FindByIdAsync(tokenClaims.UserId);
         if (user is null)
         {
             return AuthenticateResult.Fail("Unknown user.");
@@ -84,7 +84,14 @@ public class InternalApiKeyHandler : AuthenticationHandler<AuthenticationSchemeO
             return AuthenticateResult.Fail("User is locked out.");
         }
 
-        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, user.Id) };
+        // Message and correlation id come from the signed token, never from a
+        // header, so logs and audit can trust them.
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id),
+            new(UserTokenService.MessageIdClaim, tokenClaims.MessageId),
+            new(UserTokenService.CorrelationIdClaim, tokenClaims.CorrelationId)
+        };
         claims.AddRange((await _userManager.GetRolesAsync(user)).Select(role => new Claim(ClaimTypes.Role, role)));
 
         var identity = new ClaimsIdentity(claims, SchemeName);

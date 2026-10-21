@@ -70,6 +70,8 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 builder.Services.AddScoped<IEventCatalogService, EventCatalogService>();
 builder.Services.AddScoped<IMyReservationsService, MyReservationsService>();
+// Runs a reservation/cancel from the Rasa actions at most once per Idempotency-Key.
+builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
 
 // Chatbot service is intentionally isolated behind an interface so the AI
 // provider can be swapped without touching the controller or views. See

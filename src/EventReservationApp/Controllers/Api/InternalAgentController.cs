@@ -6,20 +6,29 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace EventReservationApp.Controllers.Api;
 
+/// Interni API na posebnom Kestrel endpoint-u ili portu, 
+/// sa RequireHost na kontroleru ili mrežnim pravilom, 
+/// tako da je dostupan samo iz Rasine mreže.
+
 [ApiController]
 [Route("api/internal")]
 [Authorize(AuthenticationSchemes = InternalApiKeyHandler.SchemeName)]
 public class InternalAgentController : ControllerBase
 {
+    public const string IdempotencyKeyHeader = "Idempotency-Key";
+    public const string IdempotentReplayedHeader = "Idempotent-Replayed";
     private readonly IEventCatalogService _eventCatalogService;
     private readonly IMyReservationsService _myReservationsService;
+    private readonly IIdempotencyService _idempotencyService;
 
     public InternalAgentController(
         IEventCatalogService eventCatalogService,
-        IMyReservationsService myReservationsService)
+        IMyReservationsService myReservationsService,
+        IIdempotencyService idempotencyService)
     {
         _eventCatalogService = eventCatalogService;
         _myReservationsService = myReservationsService;
+        _idempotencyService = idempotencyService;
     }
 
     // GET /api/internal/events/search?searchTerm=&startDate=&endDate=&location=&availability=
@@ -75,24 +84,72 @@ public class InternalAgentController : ControllerBase
     }
 
     // POST /api/internal/reservations  { eventId, notes }
+    // Required header Idempotency-Key: <guid> - a repeated key gets the stored answer.
     [HttpPost("reservations")]
     public async Task<ActionResult<ReservationOperationResult>> Reserve(
         [FromBody] ReserveRequest request,
-        CancellationToken cancellationToken)
+        [FromHeader(Name = IdempotencyKeyHeader)] Guid? idempotencyKey)
     {
-        var result = await _myReservationsService.ReserveForCurrentUserAsync(
-            request.EventId, request.Notes, cancellationToken);
-        return Ok(result);
+        if (idempotencyKey is not { } key || key == Guid.Empty)
+        {
+            return MissingIdempotencyKey();
+        }
+
+        // CancellationToken.None: once started, the reservation is finished and its
+        // answer stored even if the caller has given up waiting - its retry then
+        // simply gets that answer.
+        var idempotent = await _idempotencyService.ExecuteAsync(
+            key,
+            IdempotentOperations.ReservationCreate,
+            request.EventId,
+            () => _myReservationsService.ReserveForCurrentUserAsync(
+                request.EventId, request.Notes, CancellationToken.None));
+        return ToActionResult(idempotent);
     }
 
     // DELETE /api/internal/reservations/{reservationId}
+    // Required header Idempotency-Key: <guid> - a repeated key gets the stored answer.
     [HttpDelete("reservations/{reservationId:int}")]
     public async Task<ActionResult<ReservationOperationResult>> Cancel(
         int reservationId,
-        CancellationToken cancellationToken)
+        [FromHeader(Name = IdempotencyKeyHeader)] Guid? idempotencyKey)
     {
-        var result = await _myReservationsService.CancelForCurrentUserAsync(reservationId, cancellationToken);
-        return Ok(result);
+        if (idempotencyKey is not { } key || key == Guid.Empty)
+        {
+            return MissingIdempotencyKey();
+        }
+
+        // Without the key, repeating a cancel that already succeeded answers
+        // "Reservation not found."; with it, the retry gets the original success.
+        var idempotent = await _idempotencyService.ExecuteAsync(
+            key,
+            IdempotentOperations.ReservationCancel,
+            reservationId,
+            () => _myReservationsService.CancelForCurrentUserAsync(reservationId, CancellationToken.None));
+        return ToActionResult(idempotent);
+    }
+
+    // Every write must carry a key: without one a retry after a lost answer could
+    // run the operation twice. An invalid GUID never gets here - model binding
+    // already answers 400 for it.
+    private BadRequestObjectResult MissingIdempotencyKey() =>
+        BadRequest(new { error = $"The {IdempotencyKeyHeader} header (a GUID) is required." });
+
+    private ActionResult<ReservationOperationResult> ToActionResult(IdempotentResult idempotent)
+    {
+        if (idempotent.Outcome == IdempotencyOutcome.KeyReusedForDifferentRequest)
+        {
+            // Rasa builds keys from the message id, action and resource, so this
+            // means a bug on the caller's side - never run something else for it.
+            return UnprocessableEntity(new { error = "Idempotency-Key was already used for a different request." });
+        }
+
+        if (idempotent.Outcome == IdempotencyOutcome.Replayed)
+        {
+            Response.Headers[IdempotentReplayedHeader] = "true";
+        }
+
+        return Ok(idempotent.Result);
     }
 
     public sealed class ReserveRequest

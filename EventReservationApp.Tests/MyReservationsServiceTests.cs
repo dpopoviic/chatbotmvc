@@ -1,5 +1,9 @@
-﻿using EventReservationApp.Services.Implementations;
+﻿using System.Text.Json;
+using EventReservationApp.Models.Dtos;
+using EventReservationApp.Services.Implementations;
 using EventReservationApp.Tests.TestHelpers;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Xunit;
 
 namespace EventReservationApp.Tests;
@@ -106,6 +110,7 @@ public class MyReservationsServiceTests
         var result = await service.ReserveForCurrentUserAsync(1, null);
 
         Assert.False(result.Success);
+        Assert.Equal(ReservationErrorCode.AlreadyReserved, result.ErrorCode);
         Assert.NotNull(result.ErrorMessage);
     }
 
@@ -124,6 +129,22 @@ public class MyReservationsServiceTests
         var result = await service.ReserveForCurrentUserAsync(1, null);
 
         Assert.False(result.Success);
+        Assert.Equal(ReservationErrorCode.EventFull, result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ReserveForCurrentUserAsync_UnknownEvent_ReturnsEventNotFound()
+    {
+        await using var db = InMemoryDbContextFactory.Create();
+        db.AddUser("user-1");
+        await db.SaveChangesAsync();
+
+        var (service, _) = CreateService(db, FakeCurrentUser.For("user-1"));
+
+        var result = await service.ReserveForCurrentUserAsync(999, null);
+
+        Assert.False(result.Success);
+        Assert.Equal(ReservationErrorCode.EventNotFound, result.ErrorCode);
     }
 
     [Fact]
@@ -136,6 +157,59 @@ public class MyReservationsServiceTests
         var (service, _) = CreateService(db, FakeCurrentUser.Anonymous());
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => service.ReserveForCurrentUserAsync(1, null));
+    }
+
+    [Fact]
+    public async Task ReserveForCurrentUserAsync_ParallelDuplicateSavedFirst_ReturnsAlreadyReservedInsteadOfThrowing()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var root = new InMemoryDatabaseRoot();
+        await using (var seed = InMemoryDbContextFactory.Create(databaseName, root))
+        {
+            seed.AddUser("user-1");
+            seed.AddEvent(1, name: "Event A", capacity: 5);
+            await seed.SaveChangesAsync();
+        }
+
+        // A parallel request for the same user and event saves its reservation
+        // first; this save then fails the way the unique (UserId, EventId) index would.
+        var interceptor = new FailingSaveChangesInterceptor(async () =>
+        {
+            await using var parallel = InMemoryDbContextFactory.Create(databaseName, root);
+            parallel.AddReservation(100, "user-1", 1);
+            await parallel.SaveChangesAsync();
+        });
+        await using var db = InMemoryDbContextFactory.Create(databaseName, root, interceptor);
+        var (service, _) = CreateService(db, FakeCurrentUser.For("user-1"));
+
+        var result = await service.ReserveForCurrentUserAsync(1, null);
+
+        Assert.False(result.Success);
+        Assert.Equal(ReservationErrorCode.AlreadyReserved, result.ErrorCode);
+        Assert.Equal("You already have a reservation for this event.", result.ErrorMessage);
+        await using var check = InMemoryDbContextFactory.Create(databaseName, root);
+        Assert.Equal(1, await check.EventReservations.CountAsync(r => r.UserId == "user-1" && r.EventId == 1));
+    }
+
+    [Fact]
+    public async Task ReserveForCurrentUserAsync_SaveFailsForOtherReason_Throws()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var root = new InMemoryDatabaseRoot();
+        await using (var seed = InMemoryDbContextFactory.Create(databaseName, root))
+        {
+            seed.AddUser("user-1");
+            seed.AddEvent(1, name: "Event A", capacity: 5);
+            await seed.SaveChangesAsync();
+        }
+
+        // The save fails but no reservation exists - not a duplicate, so it must not be hidden.
+        await using var db = InMemoryDbContextFactory.Create(
+            databaseName, root, new FailingSaveChangesInterceptor());
+        var (service, _) = CreateService(db, FakeCurrentUser.For("user-1"));
+
+        await Assert.ThrowsAsync<DbUpdateException>(
             () => service.ReserveForCurrentUserAsync(1, null));
     }
 
@@ -177,6 +251,7 @@ public class MyReservationsServiceTests
         var result = await service.CancelForCurrentUserAsync(42);
 
         Assert.False(result.Success);
+        Assert.Equal(ReservationErrorCode.ReservationNotFound, result.ErrorCode);
 
         // The reservation must still exist, untouched, for its real owner.
         var ownerService = CreateService(db, FakeCurrentUser.For("owner")).Service;
@@ -196,6 +271,19 @@ public class MyReservationsServiceTests
         var result = await service.CancelForCurrentUserAsync(999);
 
         Assert.False(result.Success);
+        Assert.Equal(ReservationErrorCode.ReservationNotFound, result.ErrorCode);
+    }
+
+    [Fact]
+    public void ReservationOperationResult_SerializesErrorCodeAsName()
+    {
+        // The Rasa actions read "errorCode" from the internal API's JSON, so it
+        // must arrive as the name, not as the enum's number.
+        var json = JsonSerializer.Serialize(
+            ReservationOperationResult.Fail(ReservationErrorCode.AlreadyReserved, "msg"),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"errorCode\":\"AlreadyReserved\"", json);
     }
 
     [Fact]
