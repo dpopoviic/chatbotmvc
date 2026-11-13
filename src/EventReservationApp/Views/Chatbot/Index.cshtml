@@ -57,13 +57,94 @@
             const greetingHtml = chatWindow.innerHTML;
             let typingIndicator = null;
 
+            // Minimal Markdown for the bot's replies: paragraphs, "-"/"*"/"1." lists,
+            // **bold** and http(s)/www links. Built only with DOM nodes and textContent
+            // (never innerHTML), so text coming from the bot or the documents cannot
+            // inject HTML or scripts into the page.
+            function renderMarkdown(container, text) {
+                const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+                let paragraph = null;
+                let list = null;
+
+                function closeBlocks() { paragraph = null; list = null; }
+
+                lines.forEach(function (rawLine) {
+                    const line = rawLine.trim();
+                    if (!line) { closeBlocks(); return; }
+
+                    const bullet = /^[-*•]\s+(.*)$/.exec(line);
+                    // "1. text" is a list item, "1. 4. 2027." is a date (digit after the dot).
+                    const numbered = /^\d+[.)]\s+(?!\d)(.*)$/.exec(line);
+                    if (bullet || numbered) {
+                        const tag = bullet ? 'UL' : 'OL';
+                        if (!list || list.tagName !== tag) {
+                            list = document.createElement(tag);
+                            container.appendChild(list);
+                        }
+                        paragraph = null;
+                        const item = document.createElement('li');
+                        appendInline(item, (bullet || numbered)[1]);
+                        list.appendChild(item);
+                        return;
+                    }
+
+                    list = null;
+                    if (paragraph) {
+                        paragraph.appendChild(document.createElement('br'));
+                    } else {
+                        paragraph = document.createElement('p');
+                        container.appendChild(paragraph);
+                    }
+                    appendInline(paragraph, line);
+                });
+            }
+
+            // **bold** and links inside one line.
+            function appendInline(parent, text) {
+                text.split(/(\*\*[^*]+\*\*)/g).forEach(function (part) {
+                    if (/^\*\*[^*]+\*\*$/.test(part)) {
+                        const strong = document.createElement('strong');
+                        appendLinks(strong, part.slice(2, -2));
+                        parent.appendChild(strong);
+                    } else if (part) {
+                        appendLinks(parent, part);
+                    }
+                });
+            }
+
+            function appendLinks(parent, text) {
+                const urlPattern = /((?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,;:!?"'])/g;
+                let last = 0;
+                let match;
+                while ((match = urlPattern.exec(text)) !== null) {
+                    if (match.index > last) {
+                        parent.appendChild(document.createTextNode(text.slice(last, match.index)));
+                    }
+                    const link = document.createElement('a');
+                    link.href = /^https?:\/\//i.test(match[1]) ? match[1] : 'https://' + match[1];
+                    link.textContent = match[1];
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    parent.appendChild(link);
+                    last = match.index + match[1].length;
+                }
+                if (last < text.length) {
+                    parent.appendChild(document.createTextNode(text.slice(last)));
+                }
+            }
+
             function appendMessage(sender, text) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'chat-message chat-' + sender;
 
                 const body = document.createElement('div');
                 body.className = 'chat-bubble';
-                body.textContent = text;
+                if (sender === 'assistant') {
+                    body.classList.add('chat-md');
+                    renderMarkdown(body, text);
+                } else {
+                    body.textContent = text;
+                }
 
                 wrapper.appendChild(body);
                 chatWindow.appendChild(wrapper);
@@ -175,6 +256,14 @@
 
                     const data = await response.json();
                     stopTypingIndicator();
+
+                    // The server started a new conversation (the previous one expired):
+                    // drop the old messages still on screen, keep only this exchange.
+                    if (data.conversationStarted) {
+                        chatWindow.innerHTML = greetingHtml;
+                        appendMessage('user', message);
+                    }
+
                     appendMessage('assistant', data.reply);
                 } catch (err) {
                     stopTypingIndicator();

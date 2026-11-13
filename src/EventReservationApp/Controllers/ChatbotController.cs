@@ -11,10 +11,17 @@ namespace EventReservationApp.Controllers;
 public class ChatbotController : Controller
 {
     private readonly IChatbotConversationService _chatbotService;
+    private readonly IChatHistoryStore _historyStore;
+    private readonly ILogger<ChatbotController> _logger;
 
-    public ChatbotController(IChatbotConversationService chatbotService)
+    public ChatbotController(
+        IChatbotConversationService chatbotService,
+        IChatHistoryStore historyStore,
+        ILogger<ChatbotController> logger)
     {
         _chatbotService = chatbotService;
+        _historyStore = historyStore;
+        _logger = logger;
     }
 
     // GET: /Chatbot
@@ -24,12 +31,11 @@ public class ChatbotController : Controller
         return View();
     }
 
-    // How many recent messages the chat page shows when it opens.
-    private const int HistoryMessageCount = 10;
-
     // GET: /Chatbot/History
+    // The whole conversation of the current session (see SessionChatHistoryStore);
+    // empty after a new login.
     [HttpGet]
-    public async Task<IActionResult> History(CancellationToken cancellationToken)
+    public IActionResult History()
     {
         var userId =
             User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -39,13 +45,7 @@ public class ChatbotController : Controller
             return Unauthorized();
         }
 
-        var messages =
-            await _chatbotService.GetRecentMessagesAsync(
-                userId,
-                HistoryMessageCount,
-                cancellationToken);
-
-        return Json(messages);
+        return Json(_historyStore.GetMessages(userId));
     }
 
     // POST: /Chatbot/Send
@@ -72,12 +72,38 @@ public class ChatbotController : Controller
             return Unauthorized();
         }
 
+        // First message after login or after the conversation expired: Rasa may still
+        // hold an older context (it keys conversations by user id), so start it fresh as well.
+        var conversationStarted = !_historyStore.HasConversation(userId);
+        if (conversationStarted)
+        {
+            try
+            {
+                await _chatbotService.StartNewConversationAsync(userId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // The message is still sent; at worst Rasa keeps the older context.
+                _logger.LogWarning(ex, "Could not reset the Rasa conversation for user {UserId} after login.", userId);
+            }
+
+            _historyStore.StartConversation(userId);
+        }
+
+        var sentAt = DateTime.UtcNow;
+
         var response =
             await _chatbotService.GetReplyAsync(
                 userId,
                 request.Message,
                 cancellationToken);
 
+        _historyStore.Append(
+            userId,
+            new ChatMessageViewModel { Sender = "user", Text = request.Message, Timestamp = sentAt },
+            new ChatMessageViewModel { Sender = "assistant", Text = response.Reply, Timestamp = DateTime.UtcNow });
+
+        response.ConversationStarted = conversationStarted;
         return Json(response);
     }
 
@@ -98,6 +124,8 @@ public class ChatbotController : Controller
         await _chatbotService.StartNewConversationAsync(
             userId,
             cancellationToken);
+
+        _historyStore.StartConversation(userId);
 
         return Ok();
     }

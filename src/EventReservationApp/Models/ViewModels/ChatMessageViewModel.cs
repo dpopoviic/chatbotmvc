@@ -16,4 +16,8 @@ public class ChatRequestViewModel
 public class ChatResponseViewModel
 {
     public string Reply { get; set; } = string.Empty;
+
+    // True when this message started a new conversation (after login or after the
+    // previous one expired): the page then clears the old messages it still shows.
+    public bool ConversationStarted { get; set; }
 }

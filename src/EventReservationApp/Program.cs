@@ -39,6 +39,40 @@ builder.Services.ConfigureApplicationCookie(options =>
 {
     options.LoginPath = "/Identity/Account/Login";
     options.AccessDeniedPath = "/Identity/Account/AccessDenied";
+
+    // Chat history lives in the session (SessionChatHistoryStore): every login and
+    // logout starts a clean session, so the next login never sees the old chat.
+    options.Events.OnSignedIn = context =>
+    {
+        context.HttpContext.Session.Clear();
+        return Task.CompletedTask;
+    };
+    options.Events.OnSigningOut = context =>
+    {
+        context.HttpContext.Session.Clear();
+        return Task.CompletedTask;
+    };
+});
+
+// ---------------------------------------------------------------------
+// Session - holds the chatbot history of the current login (server memory).
+// The session cookie has no expiry date, so it is gone when the browser
+// closes; the data is also dropped after IdleTimeout without requests.
+// Keep IdleTimeout in line with session_expiration_time in the Rasa
+// domain.yml (60 min) - after that Rasa forgets the context as well.
+// AddDistributedMemoryCache = one server; with several servers use a shared
+// cache (e.g. Redis) instead.
+// ---------------------------------------------------------------------
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(
+        builder.Configuration.GetValue("Chatbot:SessionIdleTimeoutMinutes", 60));
+    options.Cookie.Name = ".EventReservationApp.Session";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = SameSiteMode.Lax;
 });
 
 // ---------------------------------------------------------------------
@@ -72,6 +106,8 @@ builder.Services.AddScoped<IEventCatalogService, EventCatalogService>();
 builder.Services.AddScoped<IMyReservationsService, MyReservationsService>();
 // Runs a reservation/cancel from the Rasa actions at most once per Idempotency-Key.
 builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
+// Chatbot history of the current session (no database).
+builder.Services.AddScoped<IChatHistoryStore, SessionChatHistoryStore>();
 
 // Chatbot service is intentionally isolated behind an interface so the AI
 // provider can be swapped without touching the controller or views. See
@@ -115,6 +151,9 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
+
+// Before authentication: sign-in/sign-out events clear the session.
+app.UseSession();
 
 app.UseAuthentication();
 app.UseAuthorization();
